@@ -1,0 +1,69 @@
+<?php
+/**
+ * @version  	1.0.0 jgive $
+ * @package		jgive
+ * @copyright	Copyright © 2012 - All rights reserved.
+ * @license		GNU/GPL
+ * @author		TechJoomla
+ * @author mail	extensions@techjoomla.com
+ * @website		http://techjoomla.com
+ */
+// no direct access
+defined('_JEXEC') or die('Restricted access');
+// Component Helper
+jimport('joomla.application.component.helper');
+class reportsHelper
+{
+	function getTotalAmount2BPaidOut($userid=0)
+	{
+		$db=JFactory::getDBO();	
+		$where='';
+		/*
+		$query="SELECT SUM(o.amount) AS total_amount, SUM(o.fee) AS total_commission 
+		FROM `#__jg_orders` AS o		
+		WHERE o.status='C'";
+		*/
+		
+		$query="SELECT SUM(o.amount) AS total_amount, SUM(o.fee) AS total_commission 
+		FROM `#__jg_orders` AS o ";
+		if($userid){
+			$query .=" LEFT JOIN `#__jg_campaigns` AS c ON c.id=o.campaign_id ";
+			$where=" AND c.creator_id=".$userid;
+		}
+		$query .=" WHERE o.status='C' ".$where;
+		
+		$db->setQuery($query);
+				
+		$result=$db->loadObject();
+		$TotalAmount2BPaidOut=0;
+		if($result){
+			$TotalAmount2BPaidOut=$result->total_amount-$result->total_commission;
+		}
+		return $TotalAmount2BPaidOut;
+	}
+	
+	function getTotalPaidOutAmount($userid=0)
+	{
+		$db=JFactory::getDBO();	
+		$where='';		
+		if($userid)
+			$where=" AND user_id=".$userid;
+		
+		$query="SELECT user_id,payee_name,transaction_id,date,email_id,amount
+		FROM #__jg_payouts
+		WHERE status=1 ".$where;
+
+		$db->setQuery($query);
+		$totalearn=0;
+		$result = $db->loadObjectlist();
+		$totalpaid=0;
+		if(!empty($result))
+		{
+			foreach($result as $data) { 
+				$totalpaid=$totalpaid+$data->amount;
+			}
+		}
+		return $totalpaid;
+	}	
+}
+?>
