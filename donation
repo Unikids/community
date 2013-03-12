@@ -1,0 +1,290 @@
+<?php
+/**
+ * @version  	1.0.0 jgive $
+ * @package		jgive
+ * @copyright	Copyright © 2012 - All rights reserved.
+ * @license		GNU/GPL
+ * @author		TechJoomla
+ * @author mail	extensions@techjoomla.com
+ * @website		http://techjoomla.com
+ */
+// no direct access
+defined('_JEXEC') or die('Restricted access');
+// Component Helper
+jimport('joomla.application.component.helper');
+class donationsHelper
+{
+	function getPStatusArray()
+	{
+		$pstatus=array();
+		$pstatus[]=JHTML::_('select.option','P',JText::_('COM_JGIVE_PENDING'));
+		$pstatus[]=JHTML::_('select.option','C',JText::_('COM_JGIVE_CONFIRMED'));
+		$pstatus[]=JHTML::_('select.option','RF',JText::_('COM_JGIVE_REFUND'));
+		return $pstatus;
+	}
+	
+	function getSStatusArray()
+	{
+		$sstatus=array();
+		$sstatus[]=JHTML::_('select.option','-1',JText::_('COM_JGIVE_APPROVAL_STATUS'));
+		$sstatus[]=JHTML::_('select.option','P',JText::_('COM_JGIVE_PENDING'));
+		$sstatus[]=JHTML::_('select.option','C',JText::_('COM_JGIVE_CONFIRMED'));
+		$sstatus[]=JHTML::_('select.option','RF',JText::_('COM_JGIVE_REFUND'));
+		return $sstatus;
+	}
+		
+	function sendOrderEmail($donationid)
+	{	
+		$params=JComponentHelper::getParams('com_jgive');		
+		JRequest::setVar('donationid',$donationid);
+		
+		$params=JComponentHelper::getParams('com_jgive');
+		$this->currency_code=$params->get('currency');	
+		$pstatus=array();
+		$pstatus[]=JHTML::_('select.option','P', JText::_('COM_JGIVE_PENDING'));
+		$pstatus[]=JHTML::_('select.option','C', JText::_('COM_JGIVE_CONFIRMED'));
+		$pstatus[]=JHTML::_('select.option','RF', JText::_('COM_JGIVE_REFUND'));
+		//$pstatus[]=JHTML::_('select.option','S', JText::_('COM_JGIVE_SHIPPED'));		
+		/*$pstatus[]=JHTML::_('select.option','3','Cancelled');*/
+		$this->pstatus=$pstatus;
+		
+		//$this->donation_details=$this->getDonationInfo();
+		$this->donation_details=$this->getSingleDonationInfo();
+		//print_r($donation_details);
+		//$order=comquick2cartHelper::getorderinfo($orderid);	
+		//$this->orderinfo = $order['order_info'];
+		//$this->orderitems = $order['items'];
+		$this->donations_site=1;
+		$this->donations_email=1;
+		
+		/*
+		if($this->orderinfo[0]->address_type == 'BT')
+			$billemail = $this->orderinfo[0]->user_email;
+		else if($this->orderinfo[1]->address_type == 'BT')
+			$billemail = $this->orderinfo[1]->user_email;
+		*/
+		
+		$mainframe=JFactory::getApplication();
+		$site=$mainframe->getCfg('sitename');
+		$html='<br/><div>'.JText::sprintf('COM_JGIVE_ORDER_MAIL_MSG',$site).'</div>';
+		
+		$billemail=$this->donation_details['donor']->email;
+		ob_start();
+		include(JPATH_SITE.DS.'components'.DS.'com_jgive'.DS.'views'.DS.'donations'.DS.'tmpl'.DS.'details.php');
+		$html.=ob_get_contents();
+		ob_end_clean();		
+		
+		$body=$html;
+		
+		//echo $body;		die;
+		
+		$subject=JText::sprintf('COM_JGIVE_ORDER_MAIL_SUB',$site,$donationid);
+		$this->sendmail($billemail,$subject,$body,$params->get('email'));		
+	}
+	
+	function sendmail($recipient,$subject,$body,$bcc_string)
+	{ 			 
+		global $mainframe;
+		$mainframe = JFactory::getApplication();
+		$from = $mainframe->getCfg('mailfrom');
+		$fromname = $mainframe->getCfg('fromname');
+		$recipient = trim($recipient);
+		$mode = 1;
+		$cc = null;
+		$bcc = explode(',',$bcc_string); 
+		$attachment = null;
+		$replyto = null;
+		$replytoname = null;
+		//die('herererere');
+		JUtility::sendMail($from, $fromname, $recipient, $subject, $body, $mode, $cc, $bcc, $attachment, $replyto, $replytoname);
+	}
+	
+	//used in donation details view
+	function getSingleDonationInfo()
+	{	
+		$db=JFactory::getDBO();
+		$donation_id=JRequest::getInt('donationid');
+		$query="SELECT * 
+		FROM `#__jg_donations`
+		WHERE `id`=".$donation_id;		
+		$db->setQuery($query);
+		$donation=$db->loadObject();	
+		//print_r($donation);
+		$cid=$donation->campaign_id; 
+		
+		$query="SELECT c.*
+		FROM `#__jg_campaigns` AS c
+		WHERE c.id=".$cid;				
+		$db->setQuery($query);
+		$campaign=$db->loadObject();				
+		$cdata['campaign']=$campaign;
+		
+		$query="SELECT SUM(o.amount) AS amount_received
+		FROM `#__jg_orders` AS o
+		WHERE o.campaign_id=".$cid."
+		AND o.status='C'";
+		$db->setQuery($query);
+		$cdata['campaign']->amount_received=$db->loadResult();		
+		
+		//if no donations, set receved amount as zero
+		if($cdata['campaign']->amount_received=='')
+			$cdata['campaign']->amount_received=0;
+			
+		//calculate remaining amount
+		$cdata['campaign']->remaining_amount=($cdata['campaign']->goal_amount)- ($cdata['campaign']->amount_received);
+		//////////////////////////////////////////		
+		$donation_details=array();
+		$donation_details['campaign']=$cdata['campaign'];		
+		$donor=$this->getDonorDetails($donation->donor_id);
+		$donation_details['donor']=$donor;		
+		$payment=$this->getPaymentDetails($donation->donor_id);
+		$donation_details['payment']=$payment;		
+		$donation_details['payment']->annonymous_donation=$donation->annonymous_donation;		
+		//print_r($donation_details);		
+		return $donation_details;
+	}
+	
+	//B
+	//used in donation info view
+	function getDonorDetails($donor_id)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT * 
+		FROM `#__jg_donors`
+		WHERE `id`=".$donor_id;		
+		$db->setQuery($query);
+		$donor=$db->loadObject();	
+		//print_r($donor);		
+		return $donor;
+	}
+	
+	//B
+	//used in donation info view
+	function getPaymentDetails($donor_id)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT * 
+		FROM `#__jg_orders`
+		WHERE `id`=".$donor_id;		
+		$db->setQuery($query);
+		$donor=$db->loadObject();	
+		//print_r($donor);		
+		return $donor;
+	}
+	
+	/*
+	 * Function to update status of order
+	 * 
+	    Parameters:
+	    order_id : int id of order
+	    status : string status of order
+	    comment : string default='' comment added if any
+	    $send_mail : int default=1 weather to send status change mail or not.
+	*/	
+	//B
+	public function updatestatus($order_id,$status,$comment='',$send_mail=1)
+	{
+		global $mainframe;
+		$mainframe=JFactory::getApplication();		
+		$db=JFactory::getDBO();
+		$res=new stdClass();	
+		$res->id=$order_id;
+		$res->status=$status;
+		if(!$db->updateObject('#__jg_orders',$res,'id')) 
+		{
+			return 2;
+		}
+		
+		/*
+		//START Q2C Sample development
+		$query = "SELECT o.* FROM #__kart_orders as o WHERE o.id =".$order_id;
+		$db->setQuery($query);
+		$orderobj	= $db->loadObject();				
+		$dispatcher = &JDispatcher::getInstance();
+		JPluginHelper::importPlugin('system');
+		$result=$dispatcher->trigger('Onq2cOrderUpdate',array($orderobj));//Call the plugin and get the result
+		//END Q2C Sample development		
+		*/
+		
+		if($send_mail==1)
+		{
+			$params=JComponentHelper::getParams('com_jgive');			
+			//$adminemails=comquick2cartHelper::adminMails();
+			
+			$query= "SELECT d.email, d.first_name, d.last_name
+			FROM #__jg_orders AS o
+			LEFT JOIN #__jg_donors as d ON d.id=o.donor_id
+			WHERE o.id =".$order_id;
+			$db->setQuery($query);
+ 			$orderuser=$db->loadObjectList();
+
+			$orderuser=$orderuser[0];	 			
+			//print_r($orderuser); die('hiiiii');
+			switch($status)
+			{
+				case 'C' :
+					$orderstatus =  JText::_('COM_JGIVE_CONFIRMED');
+				break;
+				case 'RF' :
+					$orderstatus = JText::_('COM_JGIVE_REFUND') ;
+				break;
+				/*
+				case 'S' :
+					$orderstatus = JText::_('QTC_SHIP') ;
+				break;
+				*/
+				case 'P' :
+					$orderstatus = JText::_('COM_JGIVE_PENDING') ;
+				break;					 		
+			}
+
+
+			$body = JText::_('COM_JGIVE_STATUS_CHANGE_BODY');
+			$site = $mainframe->getCfg('sitename');
+			if($comment)
+			{
+				$comment	= str_replace('{COMMENT}', $comment, JText::_('COM_JGIVE_COMMENT_TEXT'));
+				$find 	= array ('{ORDERNO}','{STATUS}','{SITENAME}','{NAME}', '{COMMENTTEXT}');
+				$replace= array($order_id,$orderstatus,$site,$orderuser->first_name,$comment);
+			}
+			else
+			{			
+				$find 	= array ('{ORDERNO}','{STATUS}','{SITENAME}','{NAME}', '{COMMENTTEXT}');
+				$replace= array($order_id,$orderstatus,$site,$orderuser->first_name,'');
+			}
+			
+			$body	= str_replace($find, $replace, $body);
+		//	$Itemid = comquick2cartHelper::getitemid('index.php?option=com_quick2cart&view=orders');
+			$link = JURI::root().substr(JRoute::_('index.php?option=com_jgive&view=donations&layout=details&donationid='.$order_id.'&Itemid='.$Itemid),strlen(JURI::base(true))+1);
+			$order_link = '<a href="'.$link.'">'.$link.'</a>';
+			$body	= str_replace('{LINK}', $order_link, $body);
+			$body = nl2br($body);
+			$subject = JText::sprintf('COM_JGIVE_STATUS_CHANGE_SUBJECT',$order_id);
+			//comquick2cartHelper::sendmail($orderuser->email,$subject,$body,$params->get('mail'));			
+			$this->sendmail($orderuser->email,$subject,$body,$params->get('mail'));		
+//		die('kaykay');
+		}		 			
+	}
+	
+	//used in plugin trigger
+	public function getCidFromOrderId($orderid)
+	{			
+		$db=JFactory::getDBO();
+		$query="SELECT o.campaign_id
+		FROM #__jg_orders AS o
+		WHERE o.id=".$orderid;
+		$db->setQuery($query);
+		return $db->loadResult();
+	}
+	public function getDonorIdFromOrderId($orderid)
+	{			
+		$db=JFactory::getDBO();
+		$query="SELECT d.user_id
+		FROM #__jg_orders AS o
+		LEFT JOIN #__jg_donors AS d ON d.id=o.donor_id
+		WHERE o.id=".$orderid;
+		$db->setQuery($query);
+		return $db->loadResult();
+	}
+}
+?>
