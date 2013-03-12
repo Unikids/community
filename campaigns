@@ -1,0 +1,226 @@
+<?php
+/**
+ * @version		1.0.0 jgive $
+ * @package		jgive
+ * @copyright	Copyright © 2012 - All rights reserved.
+ * @license		GNU/GPL
+ * @author		TechJoomla
+ * @author mail	extensions@techjoomla.com
+ * @website		http://techjoomla.com
+ */
+// no direct access
+defined('_JEXEC') or die('Restricted access');
+// Component Helper
+jimport('joomla.application.component.helper');
+class campaignHelper
+{
+	function getCampaignTitle($orderid)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT c.title 
+			FROM #__jg_campaigns AS c
+			LEFT JOIN #__jg_orders AS o ON o.campaign_id=c.id
+			WHERE o.id=".$orderid;
+		$db->setQuery($query);
+		return $db->loadResult();
+	}
+	
+	function getCampaignTitleFromCid($cid)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT c.title 
+			FROM #__jg_campaigns AS c
+			WHERE c.id=".$cid;
+		$db->setQuery($query);
+		return $db->loadResult();
+	}
+	
+	//used in backend - reports view
+	function getAllCampaignOptions()
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT c.id, c.title
+		FROM `#__jg_campaigns` AS c
+		ORDER BY c.title";
+		//WHERE c.id=".$cid;				
+		$db->setQuery($query);
+		$campaigns=$db->loadObjectList();				
+		return $campaigns;		
+		//print_r($campaign);
+	}
+	
+	function getCampaignAmounts($cid)
+	{
+		$db=JFactory::getDBO();
+		
+		$query="SELECT c.goal_amount
+		FROM `#__jg_campaigns` AS c
+		WHERE c.id=".$cid;				
+		$db->setQuery($query);
+		$goal_amount=$db->loadResult();	
+		
+		$query="SELECT SUM(o.amount) AS amount_received
+		FROM `#__jg_orders` AS o
+		WHERE o.campaign_id=".$cid."
+		AND o.status='C'";
+		$db->setQuery($query);
+		$amounts=array();
+		$amounts['amount_received']=$db->loadResult();
+		//if no donations, set receved amount as zero
+		if($amounts['amount_received']=='')
+			$amounts['amount_received']=0;
+			
+		//calculate remaining amount
+		$amounts['remaining_amount']=($goal_amount)- ($amounts['amount_received']);
+		
+		return $amounts;
+	}
+	
+	function getCampaignImages($cid)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT * 
+		FROM `#__jg_campaigns_images`
+		WHERE `campaign_id`=".$cid;					
+		$db->setQuery($query);
+		$images=$db->loadObjectList();		
+		return $images;
+	}
+	
+	function getCampaignGivebacks($cid)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT * 
+		FROM `#__jg_campaigns_givebacks`
+		WHERE `campaign_id`=".$cid;					
+		$db->setQuery($query);
+		$givebacks=$db->loadObjectList();		
+		return $givebacks;
+	}
+	
+	function getCampaignDonors($cid)
+	{
+		$db=JFactory::getDBO();
+		//get campaign donors
+		$query="SELECT du.user_id, du.first_name, du.last_name, du.address, du.address2, du.city, du.state, du.country, du.zip, 
+		ds.annonymous_donation, o.amount, o.cdate 
+		FROM `#__jg_donors` AS du
+		LEFT JOIN `#__jg_donations` AS ds on ds.donor_id=du.id
+		LEFT JOIN `#__jg_orders` AS o on o.id=ds.order_id
+		WHERE ds.campaign_id=".$cid." 
+		AND o.status='C'";			;					
+		$db->setQuery($query);
+		$donors=$db->loadObjectList();
+		if(isset($donors))
+		{
+			foreach($donors as $donor)
+			{
+				$donor->avatar=integrationsHelper::getUserAvatar($donor->user_id);
+				$donor->profile_url=integrationsHelper::getUserProfileUrl($donor->user_id);
+			}
+		}
+		return $donors;
+	}
+	
+	function getCampaignDonorsCount($cid)
+	{
+		$db=JFactory::getDBO();
+		$query="SELECT COUNT(o.amount) AS donors_count
+			FROM `#__jg_orders` AS o
+			WHERE o.campaign_id=".$cid."
+			AND o.status='C'";
+		$db->setQuery($query);
+		$donors_count=$db->loadResult();
+		if($donors_count=='')
+			$donors_count=0;			
+		return $donors_count;
+	}
+	
+	function uploadImage($camp_id)
+	{
+		$db=JFactory::getDBO();
+		
+		//save uploaded image
+		//check the file extension is ok
+		$file_field='camp_image';
+		$file_name = $_FILES[$file_field]['name'];		
+		$media_info=pathinfo($file_name);
+		//print_r($media_info);
+		$uploadedFileName=$media_info['filename'];
+		$uploadedFileExtension=$media_info['extension'];		
+		$validFileExts = explode(',','jpeg,jpg,png,gif');
+		//assume the extension is false until we know its ok
+		$extOk=false;
+		//go through every ok extension, if the ok extension matches the file extension (case insensitive)
+		//then the file extension is ok
+		foreach($validFileExts as $key => $value)
+		{
+			if( preg_match("/$value/i", $uploadedFileExtension ) )
+			{
+				$extOk = true;
+			}
+		}
+		if ($extOk == false) 
+		{
+			echo JText::_('COM_JGIVE_INVALID_IMAGE_EXTENSION');
+			return;
+		}
+		
+		//the name of the file in PHP's temp directory that we are going to move to our folder
+		$file_temp=$_FILES[$file_field]['tmp_name'];
+		//for security purposes, we will also do a getimagesize on the temp file (before we have moved it 
+		//to the folder) to check the MIME type of the file, and whether it has a width and height
+		$image_info=getimagesize($file_temp);
+		//we are going to define what file extensions/MIMEs are ok, and only let these ones in (whitelisting), rather than try to scan for bad
+		//types, where we might miss one (whitelisting is always better than blacklisting) 
+		$okMIMETypes = 'image/jpeg,image/pjpeg,image/png,image/x-png,image/gif';
+		$validFileTypes = explode(",", $okMIMETypes);       
+		//if the temp file does not have a width or a height, or it has a non ok MIME, return
+		if( !is_int($image_info[0]) || !is_int($image_info[1]) ||  !in_array($image_info['mime'], $validFileTypes) )
+		{
+			echo JText::_('COM_JGIVE_INVALID_IMAGE_EXTENSION');			
+			return;
+		}
+
+		//Clean up filename to get rid of strange characters like spaces etc
+		$file_name=JFile::makeSafe($uploadedFileName);		
+		//lose any special characters in the filename
+		$file_name=preg_replace("/[^A-Za-z0-9]/i", "-", $file_name);
+		//use lowercase
+		$file_name=strtolower($file_name);
+		//add timestamp to file name
+		$timestamp=time();
+		$file_name=$file_name.'_'.$timestamp.'.'.$uploadedFileExtension;
+		
+		//always use constants when making file paths, to avoid the possibilty of remote file inclusion
+		$upload_path_folder=JPATH_SITE.DS.'images'.DS.'jGive';
+		$image_upload_path_for_db='images'.DS.'jGive';
+		//if folder is not present create it
+		if(!JFolder::exists($upload_path_folder)){
+			@mkdir($upload_path_folder);
+		}
+		$upload_path=$upload_path_folder.DS.$file_name;
+		$image_upload_path_for_db.=DS.$file_name;
+		if(!JFile::upload($file_temp,$upload_path)) 
+		{
+			echo JText::_('COM_JGIVE_ERROR_MOVING_FILE');
+			return false;
+		}
+		else
+		{
+			$obj=new stdClass();		
+			$obj->id=''; 
+			$obj->campaign_id=$camp_id;
+			$obj->path=$image_upload_path_for_db;
+			$obj->order='';
+			if(!$db->insertObject('#__jg_campaigns_images',$obj,'id'))
+			{
+				echo $db->stderr();
+				return false;
+			}
+		}
+		
+		return true;
+	}
+}
+?>
